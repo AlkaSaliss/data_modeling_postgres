@@ -1,0 +1,6 @@
+{
+	"host": "127.0.0.1",
+	"dbname": "udacitydb",
+	"user": "sparkify_cto",
+	"password": "my_super_password"
+}

@@ -28,9 +28,9 @@ To set everything up, there is an extra requirement in addition to those specifi
 ```json
 {
 	"host": "127.0.0.1",
-	"dbname": "udacitydb",
-	"user": "sparkify_cto",
-	"password": "my_super_password"
+	"dbname": "studentdb",
+	"user": "student",
+	"password": "student"
 }
 ```
 

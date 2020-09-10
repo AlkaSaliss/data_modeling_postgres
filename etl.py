@@ -3,6 +3,7 @@ from pathlib import Path
 import glob
 import json
 import psycopg2
+import psycopg2.extras
 import pandas as pd
 from io import StringIO
 from datetime import datetime
@@ -46,73 +47,27 @@ def process_song_files(cur, list_files_path):
     _pretty_print("loading song data files")
     df = read_json_parallel(list_files_path)
 
-    # get song ids and artist ids
-    _pretty_print("retrieving song ids from `songs` table")
+    # INSERT ARTIST RECORDS
+    _pretty_print("Loading artists data into `artists` table")
     try:
-        list_song_ids = []
-        cur.execute(song_id_select)
-        for res in cur.fetchall():
-            list_song_ids.extend(res)
+        psycopg2.extras.execute_batch(cur, artist_table_insert,
+                                      [item for item in df[["artist_id", "artist_name", "artist_location",
+                                                            "artist_latitude", "artist_longitude"]].itertuples(index=False, name=None)],
+                                      page_size=1000)
     except psycopg2.Error as e:
-        print(f"Can't execute query {song_id_select}")
-        print(e)
-        sys.exit()
-
-    _pretty_print("retrieving artist  ids from `artists` table")
-    try:
-        list_artist_ids = []
-        cur.execute(artist_id_select)
-        for res in cur.fetchall():
-            list_artist_ids.extend(res)
-    except psycopg2.Error as e:
-        print(f"Can't execute query {artist_id_select}")
+        print("Can't insert data into artists table")
         print(e)
         sys.exit()
 
     # INSERT SONG RECORDS
     _pretty_print("Loading song data into `songs` table")
-    #     - filter songs that are already in the database
-    if list_song_ids:
-        df_songs = df[~df["song_id"].isin(list_song_ids)][[
-            "song_id", "title", "artist_id", "year", "duration"]].copy()
-    else:
-        df_songs = df[["song_id", "title",
-                       "artist_id", "year", "duration"]].copy()
-    #     - remove eventually some duplicates song ids
-    df_songs["song_id"] = df_songs.song_id.apply(lambda x: str(x))
-    df_songs.drop_duplicates("song_id",  inplace=True)
-    song_data = StringIO()
-    df_songs.to_csv(song_data, header=False, index=False, sep="\t")
-    song_data.seek(0)
     try:
-        cur.copy_from(song_data, 'songs', columns=[
-            "song_id", "title", "artist_id", "year", "duration"], sep="\t", null="")
+        psycopg2.extras.execute_batch(cur, song_table_insert,
+                                      [item for item in df[["song_id", "title", "artist_id", "year", "duration"]].itertuples(
+                                          index=False, name=None)],
+                                      page_size=1000)
     except psycopg2.Error as e:
         print("Can't insert data into songs table")
-        print(e)
-        sys.exit()
-
-    # INSERT ARTIST RECORDS
-    _pretty_print("Loading artists data into `artists` table")
-    #     - filter artists that are already in the database
-    if list_artist_ids:
-        df_artists = df[~df["artist_id"].isin(list_artist_ids)][["artist_id", "artist_name",
-                                                                 "artist_location", "artist_latitude", "artist_longitude"]].copy()
-    else:
-        df_artists = df[["artist_id", "artist_name", "artist_location",
-                         "artist_latitude", "artist_longitude"]].copy()
-    #     - remove eventually some duplicates artist ids
-    df_artists["artist_id"] = df_artists.artist_id.apply(
-        lambda x: str(x))
-    df_artists.drop_duplicates("artist_id",  inplace=True)
-    artist_data = StringIO()
-    df_artists.to_csv(artist_data, header=False, index=False, sep="\t")
-    artist_data.seek(0)
-    try:
-        cur.copy_from(artist_data, 'artists', columns=[
-            "artist_id", "name", "location", "latitude", "longitude"], sep="\t", null="")
-    except psycopg2.Error as e:
-        print("Can't insert data into artists table")
         print(e)
         sys.exit()
 
@@ -125,29 +80,6 @@ def process_log_files(cur, list_files_path):
     _pretty_print("reading logs data files")
     df = read_json_parallel(list_files_path)
 
-    # get time ids and user ids
-    _pretty_print("retrieving timestamps from `time` table")
-    try:
-        list_time_ids = []
-        cur.execute(time_id_select)
-        for res in cur.fetchall():
-            list_time_ids.extend(res)
-    except psycopg2.Error as e:
-        print(f"Can't execute query {time_id_select}")
-        print(e)
-        sys.exit()
-
-    _pretty_print("retrieving users ids from `users` table")
-    try:
-        list_user_ids = []
-        cur.execute(user_id_select)
-        for res in cur.fetchall():
-            list_user_ids.extend(res)
-    except psycopg2.Error as e:
-        print(f"Can't execute query {user_id_select}")
-        print(e)
-        sys.exit()
-
     # filter by NextSong action
     df = df[df.page == "NextSong"]
 
@@ -157,53 +89,39 @@ def process_log_files(cur, list_files_path):
     # insert time data records
     time_df = pd.DataFrame()
     time_df["start_time"] = df.new_ts
-    time_df["hour"] = df.new_ts.dt.hour
-    time_df["day"] = df.new_ts.dt.day
-    time_df["week"] = df.new_ts.dt.isocalendar().week
-    time_df["month"] = df.new_ts.dt.month
-    time_df["year"] = df.new_ts.dt.year
-    time_df["weekday"] = df.new_ts.dt.weekday
-    time_df.drop_duplicates("start_time", inplace=True)
-    buffer = StringIO()
-    if list_time_ids:
-        time_df = time_df[~time_df["start_time"].isin(list_time_ids)]
+    time_df["hour"] = df.new_ts.dt.hour.astype(int)
+    time_df["day"] = df.new_ts.dt.day.astype(int)
+    time_df["week"] = df.new_ts.dt.isocalendar().week.astype(int)
+    time_df["month"] = df.new_ts.dt.month.astype(int)
+    time_df["year"] = df.new_ts.dt.year.astype(int)
+    time_df["weekday"] = df.new_ts.dt.weekday.astype(int)
 
-    time_df.to_csv(
-        buffer, header=False, index=False, sep="\t")
-    buffer.seek(0)
     _pretty_print("Loading timestamp data into `time` table")
     try:
-        cur.copy_from(buffer, 'time', columns=[
-            "start_time", "hour", "day", "week", "month", "year", "weekday"], sep="\t", null="")
+        psycopg2.extras.execute_batch(cur, time_table_insert,
+                                      [item for item in time_df[["start_time", "hour", "day", "week",
+                                                                 "month", "year", "weekday"]].itertuples(index=False, name=None)],
+                                      page_size=1000
+                                      )
     except psycopg2.Error as e:
         print("Can't insert data into time table")
         print(e)
         sys.exit()
 
     # load user table
-    # filter rows where user id empty, or user id already in db
-    df["userId"] = df["userId"].apply(lambda x: str(x))
-    if list_user_ids:
-        user_df = df[(~df["userId"].isin(list_user_ids)) & (df["userId"] != "")][[
-            "userId", "firstName", "lastName", "gender", "level"]].copy()
-    else:
-        user_df = df[df["userId"] != ""][[
-            "userId", "firstName", "lastName", "gender", "level"]].copy()
-    user_df.drop_duplicates("userId", inplace=True)
-    buffer = StringIO()
-    user_df.to_csv(buffer, header=False, index=False, sep="\t")
-    buffer.seek(0)
     # insert user records
     _pretty_print("Loading users data into `users` table")
     try:
-        cur.copy_from(buffer, 'users', columns=[
-            "user_id", "first_name", "last_name", "gender", "level"], sep="\t", null="")
+        psycopg2.extras.execute_batch(cur, user_table_insert,
+                                      [item for item in df[["userId", "firstName", "lastName", "gender", "level"]].itertuples(
+                                          index=False, name=None)],
+                                      page_size=1000
+                                      )
     except psycopg2.Error as e:
         print("Can't insert data into users table")
         print(e)
         sys.exit()
 
-    # insert songplay records
     list_song_ids = []
     list_artist_ids = []
     for _, row in df.iterrows():
@@ -220,14 +138,13 @@ def process_log_files(cur, list_files_path):
     df["song_ids"] = list_song_ids
 
     # insert songplay record
-    songplay_data = StringIO()
-    df[["new_ts", "userId", "level", "song_ids", "artist_ids", "sessionId", "location",
-        "userAgent"]].to_csv(songplay_data, header=False, index=False, sep="\t")
-    songplay_data.seek(0)
     _pretty_print("Loading song plays data into `songplays` table")
     try:
-        cur.copy_from(songplay_data, 'songplays', columns=["start_time", "user_id", "level", "song_id",
-                                                           "artist_id", "session_id", "location", "user_agent"], sep="\t", null="")
+        psycopg2.extras.execute_batch(cur, songplay_table_insert,
+                                      [item for item in
+                                       df[["new_ts", "userId", "level", "song_ids", "artist_ids", "sessionId", "location", "userAgent"]].itertuples(index=False, name=None)],
+                                      page_size=1000
+                                      )
     except psycopg2.Error as e:
         print("Can't insert data into songplays table")
         print(e)

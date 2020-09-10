@@ -91,7 +91,7 @@ def process_log_files(cur, list_files_path):
     time_df["start_time"] = df.new_ts
     time_df["hour"] = df.new_ts.dt.hour.astype(int)
     time_df["day"] = df.new_ts.dt.day.astype(int)
-    time_df["week"] = df.new_ts.dt.isocalendar().week.astype(int)
+    time_df["week"] = df.new_ts.dt.week.astype(int)
     time_df["month"] = df.new_ts.dt.month.astype(int)
     time_df["year"] = df.new_ts.dt.year.astype(int)
     time_df["weekday"] = df.new_ts.dt.weekday.astype(int)
